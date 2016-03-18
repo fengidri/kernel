@@ -302,6 +302,7 @@ int main(int argc, char*argv[])
 	}
 	free(events);
 	close(sfd);
+    close(efd);
 	return EXIT_SUCCESS;
 }
 
