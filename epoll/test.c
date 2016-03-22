@@ -18,6 +18,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h> //  our new library
 
 /*struct addrinfo
 {
@@ -139,6 +142,14 @@ static int listen_to_port(char *port, char **log)
     return sfd;
 }
 
+int LOOP = 1;
+
+void handle_signal(int sig)
+{ // can be called asynchronously
+    printf("Recv signal will stop, wait ...\n");
+    LOOP = 0;
+}
+
 
 #define MAXEVENTS 64
 int main(int argc, char*argv[])
@@ -148,6 +159,8 @@ int main(int argc, char*argv[])
 	struct epoll_event event;
 	struct epoll_event* events;
     char *log;
+
+    signal(SIGINT, handle_signal);
 
 	if(argc!=3)
 	{
@@ -185,12 +198,12 @@ int main(int argc, char*argv[])
 	events=calloc(MAXEVENTS,sizeof event);
 
 	/* The event loop */
-	while(1)
+	while(LOOP)
 	{
 		int n,i;
         printf("\n");
-		n =epoll_wait(efd, events, MAXEVENTS,-1);
-        printf("Wake: ");
+		n =epoll_wait(efd, events, MAXEVENTS, 10);
+        printf("Wake: %d", n);
 
 		for(i=0;i< n;i++)
 		{
