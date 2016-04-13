@@ -42,6 +42,10 @@ static int port __read_mostly;
 MODULE_PARM_DESC(port, "Port to match (0=all)");
 module_param(port, int, 0);
 
+static int daddr __read_mostly;
+MODULE_PARM_DESC(daddr, "daddr ip to match (0=all)");
+module_param(daddr, int, 0);
+
 static unsigned int bufsize __read_mostly = 4096;
 MODULE_PARM_DESC(bufsize, "Log buffer size in packets (4096)");
 module_param(bufsize, uint, 0);
@@ -111,18 +115,27 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_sock *inet = inet_sk(sk);
+    if (daddr > 0)
+    {
+        if (inet->inet_daddr != daddr) goto out;
+    }
+
+    if(port > 0)
+    {
+        if (!(ntohs(inet->inet_dport) == port ||
+                ntohs(inet->inet_sport) == port))
+            goto out;
+    }
+
+    printk(KERN_ALERT "%u %u\n", inet->inet_daddr, daddr);
 
 	/* Only update if port or skb mark matches */
-	if (((port == 0 && fwmark == 0) ||
-	     ntohs(inet->inet_dport) == port ||
-	     ntohs(inet->inet_sport) == port ||
-	     (fwmark > 0 && skb->mark == fwmark)) &&
-	    (full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
-
+	if ((full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
 		spin_lock(&tcp_probe.lock);
 		/* If log fills, just silently drop */
 		if (tcp_probe_avail() > 1) {
 			struct tcp_log *p = tcp_probe.log + tcp_probe.head;
+            printk(KERN_ALERT "OK\n");
 
 			p->tstamp = ktime_get();
 			switch (sk->sk_family) {
@@ -144,6 +157,7 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 #endif
 				break;
 			default:
+                printk(KERN_ALERT "Bug\n");
 				BUG();
 			}
 
@@ -166,6 +180,7 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 		wake_up(&tcp_probe.wait);
 	}
 
+out:
 	jprobe_return();
 }
 
@@ -194,13 +209,14 @@ static int tcpprobe_sprint(char *tbuf, int n)
 	struct timespec tv
 		= ktime_to_timespec(ktime_sub(p->tstamp, tcp_probe.start));
 
+    printk(KERN_ALERT "print\n");
 	return scnprintf(tbuf, n,
-			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u %d %d\n",
+			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u\n",
 			(unsigned long)tv.tv_sec,
 			(unsigned long)tv.tv_nsec,
 			&p->src, &p->dst, p->length, p->snd_nxt, p->snd_una,
-			p->snd_cwnd, p->ssthresh, p->snd_wnd, p->srtt, p->rcv_wnd,
-            p->sk_sndbuf, p->sk_wmem_queued
+			p->snd_cwnd, p->ssthresh, p->snd_wnd, p->srtt, p->rcv_wnd
+//p->sk_sndbuf, p->sk_wmem_queued
             );
 }
 

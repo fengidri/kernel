@@ -6,7 +6,7 @@ KVERSION    := $(shell uname -r)
 #KERNEL_DIR   = /usr/src/linux-headers-$(KVERSION)/
 KERNEL_DIR   = /usr/lib/modules/$(KVERSION)/build
 MODULE_NAME  = tcp_probe
-obj-m       := tcp_probe_write_event.o
+obj-m       := tcp_probe.o
 all:
 	make -C $(KERNEL_DIR) M=$(PWD) modules
 clean:
