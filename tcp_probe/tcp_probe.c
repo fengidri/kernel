@@ -46,6 +46,10 @@ static int daddr __read_mostly;
 MODULE_PARM_DESC(daddr, "daddr ip to match (0=all)");
 module_param(daddr, int, 0);
 
+static int saddr __read_mostly;
+MODULE_PARM_DESC(saddr, "saddr ip to match (0=all)");
+module_param(saddr, int, 0);
+
 static unsigned int bufsize __read_mostly = 4096;
 MODULE_PARM_DESC(bufsize, "Log buffer size in packets (4096)");
 module_param(bufsize, uint, 0);
@@ -118,6 +122,11 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
     if (daddr > 0)
     {
         if (inet->inet_daddr != daddr) goto out;
+    }
+
+    if (saddr > 0)
+    {
+        if (inet->inet_saddr != saddr) goto out;
     }
 
     if(port > 0)
