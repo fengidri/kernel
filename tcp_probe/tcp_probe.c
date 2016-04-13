@@ -31,6 +31,7 @@
 #include <linux/time.h>
 #include <net/net_namespace.h>
 
+#include <linux/inet.h>
 #include <net/tcp.h>
 
 MODULE_AUTHOR("Stephen Hemminger <shemminger@linux-foundation.org>");
@@ -42,13 +43,13 @@ static int port __read_mostly;
 MODULE_PARM_DESC(port, "Port to match (0=all)");
 module_param(port, int, 0);
 
-static int daddr __read_mostly;
+static char *daddr __read_mostly;
 MODULE_PARM_DESC(daddr, "daddr ip to match (0=all)");
-module_param(daddr, int, 0);
+module_param(daddr, charp, 0);
 
-static int saddr __read_mostly;
+static char *saddr __read_mostly;
 MODULE_PARM_DESC(saddr, "saddr ip to match (0=all)");
-module_param(saddr, int, 0);
+module_param(saddr, charp, 0);
 
 static unsigned int bufsize __read_mostly = 4096;
 MODULE_PARM_DESC(bufsize, "Log buffer size in packets (4096)");
@@ -63,6 +64,12 @@ MODULE_PARM_DESC(full, "Full log (1=every ack packet received,  0=only cwnd chan
 module_param(full, int, 0);
 
 static const char procname[] = "tcpprobe";
+
+static struct {
+    unsigned int saddr;
+    unsigned int daddr;
+    unsigned int port;
+}filter;
 
 struct tcp_log {
 	ktime_t tstamp;
@@ -119,20 +126,14 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_sock *inet = inet_sk(sk);
-    if (daddr > 0)
-    {
-        if (inet->inet_daddr != daddr) goto out;
-    }
 
-    if (saddr > 0)
-    {
-        if (inet->inet_saddr != saddr) goto out;
-    }
+    if (filter.daddr > 0 && inet->inet_daddr != filter.daddr) goto out;
+    if (filter.saddr > 0 && inet->inet_saddr != filter.saddr) goto out;
 
-    if(port > 0)
+    if(filter.port > 0)
     {
-        if (!(ntohs(inet->inet_dport) == port ||
-                ntohs(inet->inet_sport) == port))
+        if (!(ntohs(inet->inet_dport) == filter.port ||
+                ntohs(inet->inet_sport) == filter.port))
             goto out;
     }
 
@@ -282,6 +283,17 @@ static __init int tcpprobe_init(void)
 {
 	int ret = -ENOMEM;
 
+    if (saddr)
+    {
+        filter.saddr = in_aton(saddr);
+    }
+    if (daddr)
+    {
+        filter.daddr = in_aton(daddr);
+    }
+    filter.port = port;
+
+
 	/* Warning: if the function signature of tcp_rcv_established,
 	 * has been changed, you also have to change the signature of
 	 * jtcp_rcv_established, otherwise you end up right here!
@@ -307,8 +319,8 @@ static __init int tcpprobe_init(void)
 	if (ret)
 		goto err1;
 
-	pr_info("probe registered (port=%d/fwmark=%u) bufsize=%u\n",
-		port, fwmark, bufsize);
+	pr_info("probe registered (port=%d/fwmark=%u saddr=%u daddr=%u) bufsize=%u\n",
+		filter.port, fwmark, filter.saddr, filter.daddr, bufsize);
 	return 0;
  err1:
 	remove_proc_entry(procname, init_net.proc_net);
