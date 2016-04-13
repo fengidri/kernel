@@ -127,7 +127,6 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
             goto out;
     }
 
-    printk(KERN_ALERT "%u %u\n", inet->inet_daddr, daddr);
 
 	/* Only update if port or skb mark matches */
 	if ((full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
@@ -135,7 +134,6 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 		/* If log fills, just silently drop */
 		if (tcp_probe_avail() > 1) {
 			struct tcp_log *p = tcp_probe.log + tcp_probe.head;
-            printk(KERN_ALERT "OK\n");
 
 			p->tstamp = ktime_get();
 			switch (sk->sk_family) {
@@ -157,7 +155,6 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 #endif
 				break;
 			default:
-                printk(KERN_ALERT "Bug\n");
 				BUG();
 			}
 
@@ -209,14 +206,13 @@ static int tcpprobe_sprint(char *tbuf, int n)
 	struct timespec tv
 		= ktime_to_timespec(ktime_sub(p->tstamp, tcp_probe.start));
 
-    printk(KERN_ALERT "print\n");
 	return scnprintf(tbuf, n,
-			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u\n",
+			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u %d %d\n",
 			(unsigned long)tv.tv_sec,
 			(unsigned long)tv.tv_nsec,
 			&p->src, &p->dst, p->length, p->snd_nxt, p->snd_una,
-			p->snd_cwnd, p->ssthresh, p->snd_wnd, p->srtt, p->rcv_wnd
-//p->sk_sndbuf, p->sk_wmem_queued
+			p->snd_cwnd, p->ssthresh, p->snd_wnd, p->srtt, p->rcv_wnd,
+            p->sk_sndbuf, p->sk_wmem_queued
             );
 }
 
