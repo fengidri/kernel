@@ -5,9 +5,6 @@
 #    version   :   1.0.1
 
 
-if __name__ == "__main__":
-    pass
-
 import sys
 import signal
 import os
@@ -41,7 +38,7 @@ def handle_write(data):
 def read():
     f = open('/proc/net/tcpprobe')
     while True:
-        d = f.read(200)
+        d = f.readline()
         if not d:
             break
         G.recv += len(d)

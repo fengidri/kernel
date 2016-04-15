@@ -33,11 +33,15 @@
 
 #include <linux/inet.h>
 #include <net/tcp.h>
+#include "tcp_probe_filter.h"
 
 MODULE_AUTHOR("Stephen Hemminger <shemminger@linux-foundation.org>");
+MODULE_AUTHOR("XueFeng Ding<fengidri@gmail.com>");
 MODULE_DESCRIPTION("TCP cwnd snooper");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.1");
+
+
 
 static int port __read_mostly;
 MODULE_PARM_DESC(port, "Port to match (0=all)");
@@ -64,12 +68,7 @@ MODULE_PARM_DESC(full, "Full log (1=every ack packet received,  0=only cwnd chan
 module_param(full, int, 0);
 
 static const char procname[] = "tcpprobe";
-
-static struct {
-    unsigned int saddr;
-    unsigned int daddr;
-    unsigned int port;
-}filter;
+static const char procname_filter[] = "tcpprobe_fitler";
 
 struct tcp_log {
 	ktime_t tstamp;
@@ -88,6 +87,7 @@ struct tcp_log {
     int sk_sndbuf;
     int sk_wmem_queued;
 	u32	srtt;
+	u32	rto;
 };
 
 static struct {
@@ -127,16 +127,8 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 	const struct tcp_sock *tp = tcp_sk(sk);
 	const struct inet_sock *inet = inet_sk(sk);
 
-    if (filter.daddr > 0 && inet->inet_daddr != filter.daddr) goto out;
-    if (filter.saddr > 0 && inet->inet_saddr != filter.saddr) goto out;
-
-    if(filter.port > 0)
-    {
-        if (!(ntohs(inet->inet_dport) == filter.port ||
-                ntohs(inet->inet_sport) == filter.port))
-            goto out;
-    }
-
+    if (!tcpprobe_filter_qualified(sk, skb))
+        goto out;
 
 	/* Only update if port or skb mark matches */
 	if ((full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
@@ -178,6 +170,7 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
             p->sk_wmem_queued = sk->sk_wmem_queued;
 			p->ssthresh = tcp_current_ssthresh(sk);
 			p->srtt = tp->srtt_us >> 3;
+            p->rto  = inet_csk(sk)->icsk_rto;
 
 			tcp_probe.head = (tcp_probe.head + 1) & (bufsize - 1);
 		}
@@ -217,11 +210,12 @@ static int tcpprobe_sprint(char *tbuf, int n)
 		= ktime_to_timespec(ktime_sub(p->tstamp, tcp_probe.start));
 
 	return scnprintf(tbuf, n,
-			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u %d %d\n",
+			"%lu.%09lu %pISpc %pISpc %d %#x %#x %u %u %u %u %u %u %d %d\n",
 			(unsigned long)tv.tv_sec,
 			(unsigned long)tv.tv_nsec,
 			&p->src, &p->dst, p->length, p->snd_nxt, p->snd_una,
-			p->snd_cwnd, p->ssthresh, p->snd_wnd, p->srtt, p->rcv_wnd,
+			p->snd_cwnd, p->ssthresh,  p->srtt, p->rto,
+            p->rcv_wnd, p->snd_wnd,
             p->sk_sndbuf, p->sk_wmem_queued
             );
 }
@@ -282,18 +276,6 @@ static const struct file_operations tcpprobe_fops = {
 static __init int tcpprobe_init(void)
 {
 	int ret = -ENOMEM;
-
-    if (saddr)
-    {
-        filter.saddr = in_aton(saddr);
-    }
-    if (daddr)
-    {
-        filter.daddr = in_aton(daddr);
-    }
-    filter.port = port;
-
-
 	/* Warning: if the function signature of tcp_rcv_established,
 	 * has been changed, you also have to change the signature of
 	 * jtcp_rcv_established, otherwise you end up right here!
@@ -315,16 +297,21 @@ static __init int tcpprobe_init(void)
 	if (!proc_create(procname, S_IRUSR, init_net.proc_net, &tcpprobe_fops))
 		goto err0;
 
-	ret = register_jprobe(&tcp_jprobe);
-	if (ret)
+	if (!proc_create(procname_filter, S_IRUSR|S_IWUSR, init_net.proc_net,
+                &tcpprobe_filter_fops))
 		goto err1;
 
-	pr_info("probe registered (port=%d/fwmark=%u saddr=%u daddr=%u) bufsize=%u\n",
-		filter.port, fwmark, filter.saddr, filter.daddr, bufsize);
+	ret = register_jprobe(&tcp_jprobe);
+	if (ret)
+		goto err2;
+
+    pr_info("probe registered\n");
 	return 0;
- err1:
+err2:
+	remove_proc_entry(procname_filter, init_net.proc_net);
+err1:
 	remove_proc_entry(procname, init_net.proc_net);
- err0:
+err0:
 	kfree(tcp_probe.log);
 	return ret;
 }
@@ -333,6 +320,7 @@ module_init(tcpprobe_init);
 static __exit void tcpprobe_exit(void)
 {
 	remove_proc_entry(procname, init_net.proc_net);
+	remove_proc_entry(procname_filter, init_net.proc_net);
 	unregister_jprobe(&tcp_jprobe);
 	kfree(tcp_probe.log);
 }

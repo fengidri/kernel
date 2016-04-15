@@ -13,6 +13,8 @@ def parser_tcpprobe(f):
     lines = open(f).readlines()
     for line in lines:
         t = line.split()
+        if line[0] == '#':
+            continue
 
         con = "%s->%s" % (t[1], t[2])
         if infos.get(con):
