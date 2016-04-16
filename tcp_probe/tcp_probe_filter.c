@@ -12,7 +12,9 @@
 #include <net/tcp.h>
 #include "tcp_probe_filter.h"
 
-struct filter tcpprobe_filter;
+struct filter tcpprobe_filter = {
+    .dport = 80,
+};
 
 bool tcpprobe_filter_qualified(struct sock *sk, struct sk_buff *skb)
 {

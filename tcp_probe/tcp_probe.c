@@ -42,30 +42,9 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION("1.1");
 
 
-
-static int port __read_mostly;
-MODULE_PARM_DESC(port, "Port to match (0=all)");
-module_param(port, int, 0);
-
-static char *daddr __read_mostly;
-MODULE_PARM_DESC(daddr, "daddr ip to match (0=all)");
-module_param(daddr, charp, 0);
-
-static char *saddr __read_mostly;
-MODULE_PARM_DESC(saddr, "saddr ip to match (0=all)");
-module_param(saddr, charp, 0);
-
 static unsigned int bufsize __read_mostly = 4096;
 MODULE_PARM_DESC(bufsize, "Log buffer size in packets (4096)");
 module_param(bufsize, uint, 0);
-
-static unsigned int fwmark __read_mostly;
-MODULE_PARM_DESC(fwmark, "skb mark to match (0=no mark)");
-module_param(fwmark, uint, 0);
-
-static int full __read_mostly;
-MODULE_PARM_DESC(full, "Full log (1=every ack packet received,  0=only cwnd changes)");
-module_param(full, int, 0);
 
 static const char procname[] = "tcpprobe";
 static const char procname_filter[] = "tcpprobe_filter";
