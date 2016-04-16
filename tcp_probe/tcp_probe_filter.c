@@ -26,11 +26,11 @@ bool tcpprobe_filter_qualified(struct sock *sk, struct sk_buff *skb)
         return false;
 
     if(tcpprobe_filter.sport > 0 &&
-            ntohs(inet->inet_dport) != tcpprobe_filter.dport)
+            ntohs(inet->inet_sport) != tcpprobe_filter.sport)
         return false;
 
     if(tcpprobe_filter.dport > 0 &&
-            ntohs(inet->inet_sport) != tcpprobe_filter.sport)
+            ntohs(inet->inet_dport) != tcpprobe_filter.dport)
         return false;
 
     return true;
@@ -40,17 +40,13 @@ bool tcpprobe_filter_qualified(struct sock *sk, struct sk_buff *skb)
 static ssize_t tcpprobe_filter_write(struct file *file, const char *data,
         size_t len, loff_t *off)
 {
-    if(*off > 0)
-        return 0;
-
     if (len < sizeof(tcpprobe_filter))
-    {
-        return 0;
-    }
+        return -EFAULT;
+
     if(copy_from_user((void *)&tcpprobe_filter, data, sizeof(tcpprobe_filter)))
         return -EFAULT;
-    *off += sizeof(tcpprobe_filter);
-    return sizeof(tcpprobe_filter);
+
+    return len;
 }
 
 static ssize_t tcpprobe_filter_read(struct file *file, char __user *buf,
@@ -68,10 +64,10 @@ static ssize_t tcpprobe_filter_read(struct file *file, char __user *buf,
 
     cnt = snprintf(buffer, sizeof(buffer),
             "tcp probe filter: %lu\n"
-            "saddr:%u\n"
-            "daddr:%u\n"
-            "sport:%u\n"
-            "dport:%u\n",
+            "saddr: %u\n"
+            "daddr: %u\n"
+            "sport: %u\n"
+            "dport: %u\n",
             sizeof(tcpprobe_filter),
             tcpprobe_filter.saddr,
             tcpprobe_filter.daddr,

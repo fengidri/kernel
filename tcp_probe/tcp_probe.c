@@ -68,7 +68,7 @@ MODULE_PARM_DESC(full, "Full log (1=every ack packet received,  0=only cwnd chan
 module_param(full, int, 0);
 
 static const char procname[] = "tcpprobe";
-static const char procname_filter[] = "tcpprobe_fitler";
+static const char procname_filter[] = "tcpprobe_filter";
 
 struct tcp_log {
 	ktime_t tstamp;
@@ -131,7 +131,7 @@ static void jtcp_rcv_established(struct sock *sk, struct sk_buff *skb,
         goto out;
 
 	/* Only update if port or skb mark matches */
-	if ((full || tp->snd_cwnd != tcp_probe.lastcwnd)) {
+	if (1 || (tp->snd_cwnd != tcp_probe.lastcwnd)) {
 		spin_lock(&tcp_probe.lock);
 		/* If log fills, just silently drop */
 		if (tcp_probe_avail() > 1) {
@@ -323,5 +323,6 @@ static __exit void tcpprobe_exit(void)
 	remove_proc_entry(procname_filter, init_net.proc_net);
 	unregister_jprobe(&tcp_jprobe);
 	kfree(tcp_probe.log);
+    pr_info("probe exit\n");
 }
 module_exit(tcpprobe_exit);

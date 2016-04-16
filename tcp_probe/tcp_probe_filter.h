@@ -12,7 +12,6 @@ struct filter{
     unsigned int daddr;
     unsigned int sport;
     unsigned int dport;
-    unsigned int port;
 };
 bool tcpprobe_filter_qualified(struct sock *sk, struct sk_buff *skb);
 extern const struct file_operations tcpprobe_filter_fops;
