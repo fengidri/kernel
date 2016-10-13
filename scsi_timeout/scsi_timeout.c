@@ -100,8 +100,10 @@ static int scsi_timeout_proc_show(struct seq_file *m, void *v)
 
         sdev = to_scsi_device(dev);
 
-        seq_printf(m, "%s id:%d timeout: %dms\n",
+        seq_printf(m, "%s driver: %s type: %s id:%d timeout: %dms\n",
                 dev_name(dev),
+                dev->driver->name,
+                dev->type->name,
                 sdev->id,
                 sdev->request_queue->rq_timeout * 1000 / HZ);
 
