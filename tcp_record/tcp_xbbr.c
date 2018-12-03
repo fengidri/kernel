@@ -98,7 +98,7 @@ struct bbr {
 		round_start:1,	     /* start of packet-timed tx->ack round? */
 		idle_restart:1,	     /* restarting after idle? */
 		probe_rtt_round_done:1,  /* a BBR_PROBE_RTT round at 4 pkts? */
-		unused:13,
+		start1:13,
 		lt_is_sampling:1,    /* taking long-term ("LT") samples now? */
 		lt_rtt_cnt:7,	     /* round trips in long-term interval */
 		lt_use_bw:1;	     /* use lt_bw as our bw estimate? */
@@ -112,9 +112,12 @@ struct bbr {
 		full_bw_cnt:2,	/* number of rounds without large bw gains */
 		cycle_idx:3,	/* current index in pacing_gain cycle array */
 		has_seen_rtt:1, /* have we seen an RTT sample yet? */
-		unused_b:5;
+        recorded:1,
+		start2:4;
 	u32	prior_cwnd;	/* prior cwnd upon entering loss recovery */
 	u32	full_bw;	/* recent bw, to estimate if pipe is full */
+//    u32 recorded;
+//    u64 start_time;
 };
 
 #define CYCLE_LEN	8	/* number of phases in a pacing gain cycle */
@@ -847,6 +850,7 @@ static void bbr_init(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr *bbr = inet_csk_ca(sk);
+    u32 ms;
 
 	bbr->prior_cwnd = 0;
 	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
@@ -876,6 +880,15 @@ static void bbr_init(struct sock *sk)
 	bbr_reset_startup_mode(sk);
 
 	cmpxchg(&sk->sk_pacing_status, SK_PACING_NONE, SK_PACING_NEEDED);
+
+
+    bbr->recorded = 0;
+
+
+    ms = tcp_time_stamp_raw();
+
+    bbr->start1 = ms % 8191;
+    bbr->start2 = (ms >> 13) % 15;
 }
 
 static u32 bbr_sndbuf_expand(struct sock *sk)
@@ -940,9 +953,55 @@ static void bbr_set_state(struct sock *sk, u8 new_state)
 	}
 }
 
+#include "output.c"
+
+static void tcp_record_ack_event(struct sock *sk, u32 flags)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct bbr *bbr = inet_csk_ca(sk);
+    u32 in_flight, ms, now;
+    const struct inet_sock *inet = inet_sk(sk);
+    char buf[512];
+    int len;
+
+    if (tp->bytes_acked < 60 * 1024 || bbr->recorded)
+    {
+        return;
+    }
+
+    bbr->recorded = 1;
+
+    if (ntohs(inet->inet_sport) != 80)
+    {
+        return;
+    }
+
+    now = tcp_time_stamp_raw();
+    ms = now % 8191 - bbr->start1;
+    ms += (((now >> 13)%15) - bbr->start2) * 8192;
+
+    in_flight = tcp_packets_in_flight(tp);
+    len = snprintf(buf, sizeof(buf), "%pI4:%d == %pI4:%d time: %u "
+                "bytes_acked: %lld flight: %u wmem_queued: %d",
+            &inet->inet_saddr,
+            ntohs(inet->inet_sport),
+            &inet->inet_daddr,
+            ntohs(inet->inet_dport),
+            ms,
+            tp->bytes_acked,
+            in_flight,
+            sk->sk_wmem_queued
+          );
+
+    //printk(KERN_ERR "%s\n", buf);
+
+    send_msg(buf, len + 1);
+}
+
+
 static struct tcp_congestion_ops tcp_bbr_cong_ops __read_mostly = {
 	.flags		= TCP_CONG_NON_RESTRICTED,
-	.name		= "bbr",
+	.name		= "xbbr",
 	.owner		= THIS_MODULE,
 	.init		= bbr_init,
 	.cong_control	= bbr_main,
@@ -953,10 +1012,12 @@ static struct tcp_congestion_ops tcp_bbr_cong_ops __read_mostly = {
 	.min_tso_segs	= bbr_min_tso_segs,
 	.get_info	= bbr_get_info,
 	.set_state	= bbr_set_state,
+    .in_ack_event = tcp_record_ack_event,
 };
 
 static int __init bbr_register(void)
 {
+    netlink_init();
 	BUILD_BUG_ON(sizeof(struct bbr) > ICSK_CA_PRIV_SIZE);
 	return tcp_register_congestion_control(&tcp_bbr_cong_ops);
 }
@@ -964,6 +1025,7 @@ static int __init bbr_register(void)
 static void __exit bbr_unregister(void)
 {
 	tcp_unregister_congestion_control(&tcp_bbr_cong_ops);
+    netlink_exit();
 }
 
 module_init(bbr_register);
