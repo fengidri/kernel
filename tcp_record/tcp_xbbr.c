@@ -959,10 +959,7 @@ static void tcp_record_ack_event(struct sock *sk, u32 flags)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr *bbr = inet_csk_ca(sk);
-    u32 in_flight, ms, now;
     const struct inet_sock *inet = inet_sk(sk);
-    char buf[512];
-    int len;
 
     if (tp->bytes_acked < 60 * 1024 || bbr->recorded)
     {
@@ -976,26 +973,7 @@ static void tcp_record_ack_event(struct sock *sk, u32 flags)
         return;
     }
 
-    now = tcp_time_stamp_raw();
-    ms = now % 8191 - bbr->start1;
-    ms += (((now >> 13)%15) - bbr->start2) * 8192;
-
-    in_flight = tcp_packets_in_flight(tp);
-    len = snprintf(buf, sizeof(buf), "%pI4:%d == %pI4:%d time: %u "
-                "bytes_acked: %lld flight: %u wmem_queued: %d",
-            &inet->inet_saddr,
-            ntohs(inet->inet_sport),
-            &inet->inet_daddr,
-            ntohs(inet->inet_dport),
-            ms,
-            tp->bytes_acked,
-            in_flight,
-            sk->sk_wmem_queued
-          );
-
-    //printk(KERN_ERR "%s\n", buf);
-
-    send_msg(buf, len + 1);
+    send_msg(sk);
 }
 
 

@@ -13,20 +13,46 @@
 #include <linux/string.h>
 
 #define NETLINK_TCP_RECORD 25
-#define MAX_MSGSIZE 64
 
 static struct sock *nl_sock = NULL;
 static int pid;
 
-void send_msg(char *msg, int msglen)
+static int format(struct sock *sk, char *msg, int size)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct bbr *bbr = inet_csk_ca(sk);
+    const struct inet_sock *inet = inet_sk(sk);
+    u32 in_flight, ms, now;
+
+    now = tcp_time_stamp_raw();
+    ms = now % 8191 - bbr->start1;
+    ms += (((now >> 13)%15) - bbr->start2) * 8192;
+
+    in_flight = tcp_packets_in_flight(tp);
+
+    return snprintf(msg, size, "%pI4:%d == %pI4:%d time: %u "
+                "bytes_acked: %lld flight: %u wmem_queued: %d",
+            &inet->inet_saddr, ntohs(inet->inet_sport),
+            &inet->inet_daddr, ntohs(inet->inet_dport),
+            ms,
+            tp->bytes_acked, in_flight,
+            sk->sk_wmem_queued
+          );
+}
+
+void send_msg(struct sock *sk)
 {
     struct sk_buff *skb = NULL;
     struct nlmsghdr *nlh = NULL;
     int rc;
+    char msg[512];
+    int msglen;
 
-    if (msg == NULL || nl_sock == NULL || 0 == pid) {
+    if (nl_sock == NULL || 0 == pid) {
         return;
     }
+
+    msglen = format(sk, msg, sizeof(msg));
 
     skb = alloc_skb(NLMSG_SPACE(msglen), GFP_KERNEL);
     if (skb == NULL) {
