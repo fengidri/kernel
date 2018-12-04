@@ -22,6 +22,9 @@ static int format(struct sock *sk, char *msg, int size)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr *bbr = inet_csk_ca(sk);
     const struct inet_sock *inet = inet_sk(sk);
+    const struct inet_connection_sock *icsk = inet_csk(sk);
+
+
     u32 in_flight, ms, now;
 
     now = tcp_time_stamp_raw();
@@ -30,13 +33,25 @@ static int format(struct sock *sk, char *msg, int size)
 
     in_flight = tcp_packets_in_flight(tp);
 
-    return snprintf(msg, size, "%pI4:%d == %pI4:%d time: %u "
-                "bytes_acked: %lld flight: %u wmem_queued: %d",
+    return snprintf(msg, size,
+            "%pI4:%d => %pI4:%d time: %u "
+            "rtt: %d rttvar: %d rto: %d ato: %d "
+            "cwnd: %d "
+            "bytes_acked: %lld flight: %u wmem_queued: %d "
+            "retransmits: %d "
+            ,
             &inet->inet_saddr, ntohs(inet->inet_sport),
             &inet->inet_daddr, ntohs(inet->inet_dport),
             ms,
+            tp->srtt_us >> 3,
+            tp->mdev_us >> 2,
+            jiffies_to_usecs(icsk->icsk_rto),
+            jiffies_to_usecs(icsk->icsk_ack.ato),
+            tp->snd_cwnd,
             tp->bytes_acked, in_flight,
-            sk->sk_wmem_queued
+            sk->sk_wmem_queued,
+            icsk->icsk_retransmits
+
           );
 }
 

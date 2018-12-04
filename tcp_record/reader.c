@@ -16,21 +16,17 @@
 #include <linux/netlink.h>
 #include <linux/socket.h>
 #include <errno.h>
-#define MAX_PAYLOAD 1024 // maximum payload size
+#include <fcntl.h>
 #define NETLINK_TCP_RECORD 25
 
-int main(int argc, char* argv[])
-{
-    int state;
-    struct sockaddr_nl src_addr, dest_addr;
-    struct nlmsghdr *nlh = NULL; //Netlink数据包头
-    struct iovec iov;
-    struct msghdr msg;
-    int sock_fd, retval;
-    int state_smg = 0;
+static int filefd;
 
-    // Create a socket
-    sock_fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_TCP_RECORD);
+int netlink_bind(int tp)
+{
+    struct sockaddr_nl src_addr;
+    int sock_fd, retval;
+
+    sock_fd = socket(AF_NETLINK, SOCK_RAW, tp);
     if(sock_fd == -1){
         printf("error getting socket: %s", strerror(errno));
         return -1;
@@ -39,7 +35,7 @@ int main(int argc, char* argv[])
     // To prepare binding
     memset(&src_addr, 0, sizeof(src_addr));
     src_addr.nl_family = AF_NETLINK;
-    src_addr.nl_pid = 100; //A：设置源端端口号
+    src_addr.nl_pid    = 100; //A：设置源端端口号
     src_addr.nl_groups = 0;
 
     //Bind
@@ -50,25 +46,34 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    // To orepare create mssage
-    nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PAYLOAD));
-    if(!nlh){
-        printf("malloc nlmsghdr error!\n");
-        close(sock_fd);
-        return -1;
-    }
+    return sock_fd;
+}
+
+
+int netlink_send(int sock_fd, const char *str, int src)
+{
+    struct nlmsghdr *nlh = NULL; //Netlink数据包头
+    char buf[NLMSG_SPACE(1024)];
+    struct iovec iov;
+    struct msghdr msg;
+    struct sockaddr_nl dest_addr;
+
+    nlh = (struct nlmsghdr *)buf;
+
 
     memset(&dest_addr,0,sizeof(dest_addr));
     dest_addr.nl_family = AF_NETLINK;
-    dest_addr.nl_pid = 0; //B：设置目的端口号
+    dest_addr.nl_pid    = 0; //B：设置目的端口号
     dest_addr.nl_groups = 0;
-    nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
-    nlh->nlmsg_pid = 100; //C：设置源端口
+
+    nlh->nlmsg_len   = NLMSG_SPACE(1024);
+    nlh->nlmsg_pid   = src; //C：设置源端口
     nlh->nlmsg_flags = 0;
 
-    strcpy(NLMSG_DATA(nlh),"Hello you!"); //设置消息体
+    strcpy(NLMSG_DATA(nlh), str); //设置消息体
+
     iov.iov_base = (void *)nlh;
-    iov.iov_len = NLMSG_SPACE(MAX_PAYLOAD);
+    iov.iov_len = NLMSG_SPACE(1024);
 
     //Create mssage
     memset(&msg, 0, sizeof(msg));
@@ -76,27 +81,111 @@ int main(int argc, char* argv[])
     msg.msg_namelen = sizeof(dest_addr);
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
-    //send message
-    printf("state_smg\n");
-    state_smg = sendmsg(sock_fd,&msg,0);
-    if(state_smg == -1)
-    {
-        printf("get error sendmsg = %s\n",strerror(errno));
-    }
-    memset(nlh,0,NLMSG_SPACE(MAX_PAYLOAD));
-    //receive message
-    printf("waiting received!\n");
+
+    return sendmsg(sock_fd, &msg,0);
+}
+
+typedef  int (netlink_handler)(int rc, struct nlmsghdr *nlh);
+
+int netlink_recv(int sock_fd, netlink_handler *handler)
+{
+    int rc;
+    struct nlmsghdr *nlh = NULL; //Netlink数据包头
+
+    char buf[NLMSG_SPACE(1024)];
+    struct iovec iov;
+    struct msghdr msg;
+
+    nlh = (struct nlmsghdr *)buf;
+
+    nlh->nlmsg_len   = NLMSG_SPACE(1024);
+    nlh->nlmsg_pid   = 0; //C：设置源端口
+    nlh->nlmsg_flags = 0;
+
+
+    iov.iov_base = (void *)nlh;
+    iov.iov_len = NLMSG_SPACE(1024);
+
+    //Create mssage
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
 
     while(1){
-        state = recvmsg(sock_fd, &msg, 0);
-        if(state<0)
-        {
-            printf("state<1");
-        }
-        printf("%s\n",(char *) NLMSG_DATA(nlh));
+        rc = recvmsg(sock_fd, &msg, 0);
+        handler(rc, nlh);
+    }
+}
+
+
+int msg_handler(int rc, struct nlmsghdr *nlh)
+{
+    static int total;
+
+    if (rc < 0) return -1;
+
+
+    rc = write(filefd, (char *)NLMSG_DATA(nlh), nlh->nlmsg_len);
+    if (rc < 0)
+    {
+        printf("write file error:%s\n", strerror(errno));
+    }
+    write(filefd, "\n", 1);
+
+    total += nlh->nlmsg_len;
+
+    if (total > 1024 * 1024 * 1024)
+    {
+        ftruncate(filefd, 0);
+        lseek(filefd, 0, SEEK_SET);
+        total = 0;
     }
 
-    close(sock_fd);
+    return 0;
+}
+
+
+
+int main(int argc, char* argv[])
+{
+    int fd;
+
+    if (argc != 2)
+    {
+        printf("need arg as the log file path.\n");
+        return -1;
+    }
+
+    filefd = open(argv[1], O_WRONLY|O_APPEND | O_CREAT, S_IRUSR | S_IWUSR);
+    if (filefd < 0)
+    {
+        printf("open file %s: %s", argv[1], strerror(errno));
+        return -1;
+    }
+    printf("filefd: %d\n", filefd);
+
+    fd = netlink_bind(NETLINK_TCP_RECORD);
+
+    if(fd == -1){
+        printf("error getting socket: %s", strerror(errno));
+        return -1;
+    }
+
+    int rc;
+
+    rc = netlink_send(fd, "hi", 100);
+
+    if (rc < 0)
+    {
+        printf("get error sendmsg = %s\n",strerror(errno));
+        return -1;
+    }
+
+    printf("waiting received!\n");
+
+    netlink_recv(fd, msg_handler);
+
+    close(fd);
     return 0;
 }
 
