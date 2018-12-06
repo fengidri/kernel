@@ -34,7 +34,7 @@ static int format(struct sock *sk, char *msg, int size)
     last = last * 10;
 
     ms = val.tv_sec * 1000 + val.tv_usec / 1000;
-    ms = ms % ((1024 - 1) * 10)
+    ms = ms % ((1024 - 1) * 10);
 
 
     in_flight = tcp_packets_in_flight(tp);
