@@ -23,9 +23,12 @@ static int format(struct sock *sk, char *msg, int size)
 	struct bbr *bbr = inet_csk_ca(sk);
     const struct inet_sock *inet = inet_sk(sk);
     const struct inet_connection_sock *icsk = inet_csk(sk);
+    struct timeval val;
 
 
     u32 in_flight, ms, now;
+
+    do_gettimeofday(&val);
 
     now = tcp_time_stamp_raw();
     ms = now % 8191 - bbr->start1;
@@ -34,12 +37,13 @@ static int format(struct sock *sk, char *msg, int size)
     in_flight = tcp_packets_in_flight(tp);
 
     return snprintf(msg, size,
-            "%pI4:%d => %pI4:%d time: %u "
+            "%ld %pI4:%d => %pI4:%d time: %u "
             "rtt: %d rttvar: %d rto: %d ato: %d "
             "cwnd: %d "
             "bytes_acked: %lld flight: %u wmem_queued: %d "
-            "retransmits: %d "
+            "retransmits: %d\n"
             ,
+            val.tv_sec,
             &inet->inet_saddr, ntohs(inet->inet_sport),
             &inet->inet_daddr, ntohs(inet->inet_dport),
             ms,
@@ -51,7 +55,6 @@ static int format(struct sock *sk, char *msg, int size)
             tp->bytes_acked, in_flight,
             sk->sk_wmem_queued,
             icsk->icsk_retransmits
-
           );
 }
 
@@ -60,7 +63,7 @@ void send_msg(struct sock *sk)
     struct sk_buff *skb = NULL;
     struct nlmsghdr *nlh = NULL;
     int rc;
-    char msg[512];
+    char msg[1024];
     int msglen;
 
     if (nl_sock == NULL || 0 == pid) {
@@ -68,6 +71,7 @@ void send_msg(struct sock *sk)
     }
 
     msglen = format(sk, msg, sizeof(msg));
+    msglen += 1; // add null char
 
     skb = alloc_skb(NLMSG_SPACE(msglen), GFP_KERNEL);
     if (skb == NULL) {
@@ -75,11 +79,10 @@ void send_msg(struct sock *sk)
         return;
     }
 
-    nlh = nlmsg_put(skb, 0, 0, 0, msglen, 0);
     NETLINK_CB(skb).portid = 0;
     NETLINK_CB(skb).dst_group = 0;
+    nlh = nlmsg_put(skb, 0, 0, 0, msglen, 0);
     memcpy(NLMSG_DATA(nlh), msg, msglen);
-
 
     rc = netlink_unicast(nl_sock, skb, pid, MSG_DONTWAIT);
     if (rc < 0)

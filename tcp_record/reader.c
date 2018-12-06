@@ -121,16 +121,18 @@ int netlink_recv(int sock_fd, netlink_handler *handler)
 int msg_handler(int rc, struct nlmsghdr *nlh)
 {
     static int total;
+    char *msg;
 
     if (rc < 0) return -1;
 
+    //printf("recv msglen: %d %ld\n", nlh->nlmsg_len, strlen(msg));
 
-    rc = write(filefd, (char *)NLMSG_DATA(nlh), nlh->nlmsg_len);
+    msg = (char *)NLMSG_DATA(nlh);
+    rc = write(filefd, msg, strlen(msg));
     if (rc < 0)
     {
         printf("write file error:%s\n", strerror(errno));
     }
-    write(filefd, "\n", 1);
 
     total += nlh->nlmsg_len;
 
@@ -150,19 +152,19 @@ int main(int argc, char* argv[])
 {
     int fd;
 
-    if (argc != 2)
+    if (argc == 2)
     {
-        printf("need arg as the log file path.\n");
-        return -1;
+        filefd = open(argv[1], O_WRONLY|O_APPEND | O_CREAT, S_IRUSR | S_IWUSR);
+        if (filefd < 0)
+        {
+            printf("open file %s: %s", argv[1], strerror(errno));
+            return -1;
+        }
+    }
+    else{
+        filefd = 1;
     }
 
-    filefd = open(argv[1], O_WRONLY|O_APPEND | O_CREAT, S_IRUSR | S_IWUSR);
-    if (filefd < 0)
-    {
-        printf("open file %s: %s", argv[1], strerror(errno));
-        return -1;
-    }
-    printf("filefd: %d\n", filefd);
 
     fd = netlink_bind(NETLINK_TCP_RECORD);
 
