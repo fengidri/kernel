@@ -26,13 +26,15 @@ static int format(struct sock *sk, char *msg, int size)
     struct timeval val;
 
 
-    u32 in_flight, ms, now;
+    u32 in_flight, ms, last;
 
     do_gettimeofday(&val);
 
-    now = tcp_time_stamp_raw();
-    ms = now % 8191 - bbr->start1;
-    ms += (((now >> 13)%15) - bbr->start2) * 8192;
+    last = bbr->start1 + bbr->start2 << 5;
+    last = last * 10;
+
+    ms = val.tv_sec * 1000 + val.tv_usec / 1000;
+
 
     in_flight = tcp_packets_in_flight(tp);
 
@@ -46,7 +48,7 @@ static int format(struct sock *sk, char *msg, int size)
             val.tv_sec,
             &inet->inet_saddr, ntohs(inet->inet_sport),
             &inet->inet_daddr, ntohs(inet->inet_dport),
-            ms,
+            ms - last,
             tp->srtt_us >> 3,
             tp->mdev_us >> 2,
             jiffies_to_usecs(icsk->icsk_rto),

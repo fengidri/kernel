@@ -809,6 +809,8 @@ static void bbr_init(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct bbr *bbr = inet_csk_ca(sk);
+    struct timeval val;
+    u32 ms;
 
 	bbr->prior_cwnd = 0;
 	bbr->tso_segs_goal = 0;	 /* default segs per skb until first ACK */
@@ -837,6 +839,15 @@ static void bbr_init(struct sock *sk)
 	bbr->cycle_idx = 0;
 	bbr_reset_lt_bw_sampling(sk);
 	bbr_reset_startup_mode(sk);
+
+    bbr->recorded = 0;
+
+    do_gettimeofday(&val);
+
+    ms = val.tv_sec * 1000 + val.tv_usec / 1000;
+    ms = ms / 10;
+    bbr->start1 = ms;
+    bbr->start2 = ms >> 5;
 }
 
 static u32 bbr_sndbuf_expand(struct sock *sk)
@@ -901,9 +912,34 @@ static void bbr_set_state(struct sock *sk, u8 new_state)
 	}
 }
 
+
+#include "output.c"
+
+static void tcp_record_ack_event(struct sock *sk, u32 flags)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct bbr *bbr = inet_csk_ca(sk);
+    const struct inet_sock *inet = inet_sk(sk);
+
+    if (tp->bytes_acked < 60 * 1024 || bbr->recorded)
+    {
+        return;
+    }
+
+    bbr->recorded = 1;
+
+    if (ntohs(inet->inet_sport) != 80)
+    {
+        return;
+    }
+
+    send_msg(sk);
+}
+
+
 static struct tcp_congestion_ops tcp_bbr_cong_ops __read_mostly = {
 	.flags		= TCP_CONG_NON_RESTRICTED,
-	.name		= "bbr",
+	.name		= "xbbr",
 	.owner		= THIS_MODULE,
 	.init		= bbr_init,
 	.cong_control	= bbr_main,
@@ -914,10 +950,12 @@ static struct tcp_congestion_ops tcp_bbr_cong_ops __read_mostly = {
 	.tso_segs_goal	= bbr_tso_segs_goal,
 	.get_info	= bbr_get_info,
 	.set_state	= bbr_set_state,
+    .in_ack_event = tcp_record_ack_event,
 };
 
 static int __init bbr_register(void)
 {
+    netlink_init();
 	BUILD_BUG_ON(sizeof(struct bbr) > ICSK_CA_PRIV_SIZE);
 	return tcp_register_congestion_control(&tcp_bbr_cong_ops);
 }
@@ -925,6 +963,7 @@ static int __init bbr_register(void)
 static void __exit bbr_unregister(void)
 {
 	tcp_unregister_congestion_control(&tcp_bbr_cong_ops);
+    netlink_exit();
 }
 
 module_init(bbr_register);
