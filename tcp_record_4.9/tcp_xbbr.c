@@ -810,6 +810,7 @@ static void bbr_init(struct sock *sk)
 
     ms = val.tv_sec * 1000 + val.tv_usec / 1000;
     ms = ms / 10;
+    ms = ms % 1023;
     bbr->start1 = ms;
     bbr->start2 = ms >> 5;
 }
