@@ -1,19 +1,30 @@
 # -*- coding: utf-8 -*
-'''
-	A very simple raw socket implementation in Python
-'''
 
 import os
 import sys, socket
 from struct import *
 import random
 import time
+import threading
+import multiprocessing
 
 
 class g:
-    via = None
+    exit = False
     raw = socket.socket(socket.AF_INET, socket.SOCK_RAW,
                 socket.IPPROTO_RAW)
+
+    via       = None
+    interface = None
+
+    src_ip    = None
+    dst_ip    = None
+    sport     = None
+    dport     = None
+    mss       = None
+    cwnd      = None
+    mtu       = None
+    protocol  = None
 
 def carry_around_add(a, b):
     c = a + b
@@ -100,11 +111,14 @@ class PacketICMP(PacketIP):
     def packet(self):
 
         cs = 0
-        mtu = 1000
+        mtu = g.mtu
 
-        packet = pack('!BBHI', 2, 0, cs, mtu)
+        _type = 3 # Network Unreachable
+        code = 4  # Fragmentation needed but no frag. bit set
+
+        packet = pack('!BBHI', _type, code, cs, mtu)
         cs = checksum(packet)
-        packet = pack('!BBHI', 2, 0, cs, mtu)
+        packet = pack('!BBHI', _type, code, cs, mtu)
 
         ip_header = self.ip_packet(socket.IPPROTO_ICMP)
         return ip_header + packet
@@ -139,6 +153,10 @@ class PacketTcp(PacketIP):
 
 
     def decode_tcp(self, packet):
+        header = packet[34:54]
+        if len(header) < 20:
+            return
+
         res = unpack('!HHLLBBHHH' , packet[34:54])
 
         self.tcp_sport         = res[0]
@@ -194,7 +212,7 @@ class PacketTcp(PacketIP):
         return tcp_checksum
 
     def tcp_gen_header(self, tcp_checksum = 0):
-        tcp_window_size = 229
+        tcp_window_size = 65535
         tcp_urgent_ptr = 0
         tcp_data_offset = 5	# 和ip header一样，没option field
 
@@ -251,8 +269,14 @@ class PacketTcp(PacketIP):
 
 
 
-            ## sack perm
-            #opts += pack('!BB', 4, 2)
+            # sack perm
+            opts += pack('!BB', 4, 2)
+
+        # timestamp
+        opts += pack('!BBIIBB', 8, 10,
+                int(time.time()), 0,
+                1, 1 # nop
+                )
 
 
 
@@ -286,6 +310,8 @@ class TcpCon(object):
         self.l_seq_num = 0
         self.p_seq_num = None
         self.mss = 48
+        self.num = 0
+        self.e_num = 0
 
         if not sport:
             sport = int(random.random() * 65535)
@@ -322,10 +348,6 @@ class TcpCon(object):
 
         return p
 
-    def send_packet(self, packet):
-        packet.send()
-
-
     def _send(self, payload = ''):
         p = self.mk_packet(payload)
 
@@ -339,27 +361,66 @@ class TcpCon(object):
         if p.tcp_flag_fin:
             self.l_seq_num += 1
 
+    def decode_packet(self, pa):
+        packet = PacketTcp(pa)
+
+        if packet.ip_saddr != self.daddr:
+            return
+
+        if packet.tcp_dport != self.sport:
+            return
+
+        self.num += 1
+
+
+        if packet.tcp_seq <= self.p_seq_num:
+            return
+
+        if packet.tcp_flag_rst:
+            return
+
+        self.p_seq_num = packet.tcp_seq + packet.payload_size - 1
+
+        self.e_num += 1
+
+        if packet.tcp_flag_syn:
+            self.p_seq_num += 1
+
+        if packet.tcp_flag_fin:
+            self.p_seq_num += 1
+
+        return packet
+
     def wait_one(self):
-        s = time.time()
         while True:
-            if time.time() - s > 3:
-                break
+            pa =  self.recv.recv(1500)
+            pa =  self.decode_packet(pa)
+            if pa:
+                return pa
 
-            pa =  self.recv.recv(1024)
-            packet = PacketTcp(pa)
-            if packet.ip_saddr == self.daddr and packet.tcp_dport == self.sport:
-                print packet.tcp_seq, packet.payload_size
-                if packet.tcp_seq > self.p_seq_num:
-                    self.p_seq_num = packet.tcp_seq + packet.payload_size - 1
 
-                    if packet.tcp_flag_syn:
-                        self.p_seq_num += 1
-                    if packet.tcp_flag_fin:
-                        self.p_seq_num += 1
+    def recv_packet_start(self):
+        q = multiprocessing.Queue()
 
-                    print self.p_seq_num
+        def recv_packet(q):
+            while True:
+                pa =  self.recv.recv(1500)
+                q.put(pa)
 
-                return packet
+        def loop(q):
+            while True:
+                    pa = q.get()
+                    self.decode_packet(pa)
+            print "thread exit"
+
+
+        p = multiprocessing.Process(target = recv_packet, args=(q,))
+        p.start()
+
+        x = threading.Thread(target = loop, args=(q,))
+        x.start()
+
+
 
     def wait_n(self, n):
         for i in range(n):
@@ -386,54 +447,128 @@ class TcpCon(object):
 
 
 
+
 http_request = "GET /1M HTTP/1.1\r\n" \
+        "Host: cdn.fengidri.me\r\n" \
+        "Accept: */*\r\n" \
+        "\r\n"
+http_request = "GET /100M HTTP/1.1\r\n" \
         "Host: test.com\r\n" \
         "Accept: */*\r\n" \
         "\r\n"
 
 
+def init_args():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s")
+    parser.add_argument("-d")
+    parser.add_argument("-r")
+    parser.add_argument("-i")
+    parser.add_argument("-p", default='tcp')
+    parser.add_argument("--sport", type = int, default=0)
+    parser.add_argument("--dport", type=int, default=80)
+    parser.add_argument("--mss", type=int, default=1460)
+    parser.add_argument("--mtu", type=int, default=1500)
+    parser.add_argument("--cwnd", type=int, default=100 * 1024)
+
+
+    args = parser.parse_args()
+
+
+    g.via       = args.r
+    g.interface = args.i
+
+    g.src_ip    = args.s
+    g.dst_ip    = args.d
+    g.sport     = args.sport
+    g.dport     = args.dport
+    g.mss       = args.mss
+    g.cwnd      = args.cwnd
+    g.mtu       = args.mtu
+    g.protocol  = args.p
+
+def send_sack(c, s, offset, e):
+    p = c.mk_packet()
+
+    p.tcp_ack_seq = s
+
+    p.sack.append((s + offset, e))
+
+    print p.sack
+    p.send()
+
+
+
+
 
 def main():
-    #g.via = '10.0.0.130'
-
-    saddr = sys.argv[1]
-    sport = int(sys.argv[2])
-    daddr = sys.argv[3]
-    dport = int(sys.argv[4])
-
-    c = TcpCon(saddr, sport, daddr, dport, sys.argv[5])
-    c.mss = 48
+    c = TcpCon(g.src_ip, g.sport, g.dst_ip, g.dport, g.interface)
+    c.mss = g.mss
     c.connect()
-
 
     seq = c.p_seq_num
     print 'mss: ', c.mss
-    print seq
 
     c.write(http_request)
 
-    for i in range(10):
-        c.wait_one()
+    # 发送不连接的包, 让服务器返回的时带上 sack
+    for i in range(3):
+        p = c.mk_packet('0' * 8)
+        p.tcp_seq  += 8 * (i  + 1) * 3
+        p.send()
+
+    time.sleep(5)
+
+    c.recv_packet_start()
+
+
+    print "+++++++++++++++++++++"
+
+    num = 0
+    c_num = 0
+    c_enum = 0
+    s = c.p_seq_num
+    while True:
+
+        time.sleep(1)
+
+        print 'recv: %d  %d  %d num: %d enum: %d' % ((c.p_seq_num - s), c.p_seq_num,
+                    s, c.num  - c_num, c.e_num - c_enum)
+
+        if c.p_seq_num - s > g.cwnd:
+            break
+
         p = c.mk_packet()
-        c.send_packet(p)
+        s = p.tcp_ack_seq
+        c_num = c.num
+        c_enum = c.e_num
+
+        p.send()
 
 
-    #icmp = PacketICMP()
-    #icmp.ip(saddr, daddr)
-    #icmp.send()
+    print "================"
 
-    #time.sleep(1)
-    #c.wait_n(500)
+    e = s + 8 * 65536
 
-    #p = c.mk_packet()
-    #p.tcp_ack_seq = seq
-    #p.sack.append((seq + 8, seq + 8 * 2))
-    #c.send_packet(p)
+    e += 5 * 1024
 
+    send_sack(c, s, 5 * 1024, e)
+    send_sack(c, s, 3 * 1024, e)
+
+    sys.exit(0)
 
 
 
-main()
+init_args()
+
+if g.protocol == 'tcp':
+    main()
+    g.exit = True
+elif g.protocol == 'icmp':
+    p = PacketICMP()
+    p.ip(g.src_ip, g.dst_ip)
+    p.send()
 
 
 
