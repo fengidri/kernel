@@ -5,6 +5,7 @@
 #include <linux/proc_fs.h>
 #include <linux/delay.h>
 #include <linux/seq_file.h>
+#include <asm/msr.h>
 
 static u64 fun_start, fun_count, fun_total;
 
@@ -66,7 +67,8 @@ static int fun_latency(struct seq_file *m, void *v)
 {
 	char buf[1024];
 	int ret, l;
-	u64 latency = 0;
+	u64 latency = 0, delay = 0;
+	u64 start, end;
 
 	fun_start = 0;
 	fun_count = 0;
@@ -76,14 +78,19 @@ static int fun_latency(struct seq_file *m, void *v)
 	if (ret)
 		return ret;
 
+	start = rdtsc();
 	msleep(time * 1000);
+	end = rdtsc();
 
 	stop_probe();
 
 	if (fun_count)
-		latency = fun_total / fun_count;
+		latency = fun_total / fun_count * 1000 * 1000 / tsc_khz;
 
-	l = sprintf(buf, "%s latency: %llu count: %llu\n", fun_name, latency, fun_count);
+	delay = (end - start) * 1000 * 1000 / tsc_khz;
+
+	l = sprintf(buf, "%s latency: %lluns count: %llu time: %lluns\n",
+	            fun_name, latency, fun_count, time, delay);
 
 	seq_write(m, buf, l);
 
